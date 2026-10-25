@@ -135,6 +135,7 @@ node server.js
 ├── docs/                        数据集说明、运行指南、AI 使用记录
 ├── 演示PPT/                     答辩 PPT（7 页）及素材
 ├── start-native.cmd             一键启动（后端 8080 + 前端 5174）
+├── push-to-github.cmd           推送到 GitHub / Gitee 的辅助脚本（非项目代码）
 ├── AI使用记录表.md              课程提交物（= docs/AI_USAGE.md）
 ├── Git提交记录.txt              Git 提交历史（24+ 次）
 └── 提交物清单.md                老师要求 → 本目录文件 对照表
