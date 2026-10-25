@@ -1,0 +1,76 @@
+server:
+  port: 8080
+  # 日期序列化统一用 yyyy-MM-dd，与前端图表 X 轴口径一致
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: aqi-dashboard
+
+  # 数据源：库由 db/init.sql 创建（12 城 × 361 天 = 4332 行）
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 注意：characterEncoding 取的是 Java 字符集名 UTF-8，不能写成 utf8mb4
+    # （utf8mb4 是 MySQL 服务端字符集名，驱动会抛 Unsupported character encoding 'utf8mb4'；
+    #   Connector/J 8 会把 UTF-8 自动映射到服务端的 utf8mb4，效果才是想要的）
+    url: jdbc:mysql://localhost:3306/aqi_dashboard?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    # 密码优先取环境变量 DB_PASSWORD，未设置时回退到本地开发默认值
+    password: ${DB_PASSWORD:123456}
+    hikari:
+      pool-name: aqiHikariPool
+      minimum-idle: 2
+      maximum-pool-size: 10
+      connection-timeout: 30000
+      # 看板数据只读，连接空闲 10 分钟后回收即可
+      idle-timeout: 600000
+
+  jackson:
+    default-property-inclusion: non_null
+    date-format: yyyy-MM-dd
+    time-zone: Asia/Shanghai
+
+  mvc:
+    # 404 时抛出异常，交给 GlobalExceptionHandler 返回统一结构
+    throw-exception-if-no-handler-found: true
+  web:
+    resources:
+      add-mappings: false
+
+mybatis:
+  # Mapper XML 位置（任务 10 交付 AirQualityMapper.xml）
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.aqi.dashboard.entity
+  configuration:
+    # 数据库下划线列名 -> Java 驼峰属性
+    map-underscore-to-camel-case: true
+    # 无匹配行时返回空 List 而非 null，避免调用方判空
+    default-executor-type: simple
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+# Swagger / OpenAPI（课程要求）：
+#   /swagger-ui/index.html  可交互调试页
+#   /v3/api-docs            OpenAPI 3.0 规范 JSON
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    # 刻意不覆盖 path：springdoc 会把该值当"基址"再拼上 swagger-ui/index.html，
+    # 若写成 /swagger-ui/index.html 会得到 /swagger-ui/swagger-ui/index.html。
+    # 默认行为即可：/swagger-ui.html 302 跳到 /swagger-ui/index.html。
+    # 按路径排序，接口列表顺序与文档里写的一致，便于对着讲
+    operations-sorter: alpha
+    tags-sorter: alpha
+  # 只看本项目的接口，不展开 /error 之类框架自带端点
+  paths-to-match: /api/**
+
+logging:
+  level:
+    root: INFO
+    com.aqi.dashboard: DEBUG
+    # 打印真实 SQL，便于验证索引命中与参数绑定
+    com.aqi.dashboard.mapper: DEBUG
+    org.springframework.web: INFO
