@@ -1,0 +1,79 @@
+<Slide style={{ padding: '20px 70px', background: '#F4F9FA' }}>
+    <Box style={{ height: '110px', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 36, fontWeight: 'bold', color: '#0E7490', lineHeight: 1.3 }}>成果演示与数据发现</Text>
+        <Box style={{ width: '56px', height: '4px', background: '#7FD1C6', marginTop: '12px' }} />
+    </Box>
+
+    <Box style={{ height: '280px', background: '#FFFFFF', borderRadius: '14px', padding: '14px', boxShadow: '0 4px 20px rgba(14,116,144,0.08)' }}>
+        <svg width='1112' height='252' viewBox='0 0 1112 252'>
+            <rect x='0' y='0' width='1112' height='34' rx='6' fill='#0E7490' />
+            <text x='18' y='23' font-size='15' fill='#FFFFFF' font-weight='bold'>城市空气质量监测看板</text>
+            <text x='980' y='23' font-size='12' fill='#B8E6E0'>数据截止 2025-12-31</text>
+
+            <rect x='0' y='44' width='248' height='208' rx='8' fill='#F4F9FA' />
+            <text x='16' y='68' font-size='13' fill='#0E7490' font-weight='bold'>筛选区</text>
+            <rect x='16' y='80' width='216' height='26' rx='5' fill='#FFFFFF' stroke='#D9E5E8' />
+            <text x='26' y='97' font-size='12' fill='#64748B'>城市（多选）北京 ×　上海 ×</text>
+            <rect x='16' y='114' width='216' height='26' rx='5' fill='#FFFFFF' stroke='#D9E5E8' />
+            <text x='26' y='131' font-size='12' fill='#64748B'>2025-12-02　~　2025-12-31</text>
+            <rect x='16' y='148' width='216' height='26' rx='5' fill='#FFFFFF' stroke='#D9E5E8' />
+            <text x='26' y='165' font-size='12' fill='#64748B'>指标：AQI</text>
+            <rect x='16' y='190' width='216' height='30' rx='6' fill='#0E7490' />
+            <text x='86' y='210' font-size='13' fill='#FFFFFF'>查询</text>
+
+            <rect x='260' y='44' width='530' height='112' rx='8' fill='#F4F9FA' />
+            <text x='276' y='66' font-size='12' fill='#0E7490' font-weight='bold'>趋势折线</text>
+            <polyline points='276,142 320,120 364,128 408,104 452,112 496,88 540,96 584,74 628,84 672,66 716,78 760,60' fill='none' stroke='#0E7490' stroke-width='2.5' />
+            <polyline points='276,150 320,138 364,132 408,124 452,120 496,116 540,104 584,108 628,100 672,96 716,92 760,88' fill='none' stroke='#7FD1C6' stroke-width='2.5' />
+
+            <rect x='802' y='44' width='310' height='112' rx='8' fill='#F4F9FA' />
+            <text x='818' y='66' font-size='12' fill='#0E7490' font-weight='bold'>城市对比柱状</text>
+            <rect x='818' y='98' width='34' height='44' rx='4' fill='#0E7490' />
+            <rect x='862' y='84' width='34' height='58' rx='4' fill='#7FD1C6' />
+            <rect x='906' y='108' width='34' height='34' rx='4' fill='#F59E0B' />
+            <rect x='950' y='76' width='34' height='66' rx='4' fill='#0E7490' />
+            <rect x='994' y='92' width='34' height='50' rx='4' fill='#7FD1C6' />
+
+            <rect x='260' y='166' width='310' height='86' rx='8' fill='#F4F9FA' />
+            <text x='276' y='188' font-size='12' fill='#0E7490' font-weight='bold'>等级分布环形</text>
+            <circle cx='330' cy='222' r='26' fill='none' stroke='#E2E8F0' stroke-width='12' />
+            <path d='M330 196 A26 26 0 0 1 356 222' fill='none' stroke='#4CAF50' stroke-width='12' />
+            <path d='M356 222 A26 26 0 0 1 330 248' fill='none' stroke='#EAB308' stroke-width='12' />
+            <path d='M330 248 A26 26 0 0 1 304 222' fill='none' stroke='#FF7E00' stroke-width='12' />
+            <text x='380' y='212' font-size='12' fill='#64748B'>优 44%</text>
+            <text x='380' y='230' font-size='12' fill='#64748B'>良 45%</text>
+            <text x='470' y='212' font-size='12' fill='#64748B'>轻度 9%</text>
+
+            <rect x='582' y='166' width='530' height='86' rx='8' fill='#F4F9FA' />
+            <text x='598' y='188' font-size='12' fill='#0E7490' font-weight='bold'>数据详情表格</text>
+            <rect x='598' y='198' width='498' height='18' rx='3' fill='#E6F6F5' />
+            <text x='606' y='211' font-size='11' fill='#0E7490'>城市　　日期　　　　AQI　等级</text>
+            <text x='606' y='229' font-size='11' fill='#64748B'>北京　2025-12-31　19　优</text>
+            <text x='606' y='245' font-size='11' fill='#64748B'>郑州　2025-12-31　52　良</text>
+        </svg>
+    </Box>
+
+    <Box style={{ height: '196px', flexDirection: 'row', gap: '16px', marginTop: '18px' }}>
+        <Box style={{ flex: 1, background: '#FFFFFF', borderRadius: '12px', padding: '20px 20px', justifyContent: 'space-between', boxShadow: '0 4px 20px rgba(14,116,144,0.08)' }}>
+            <Text style={{ fontSize: 44, fontWeight: 'bold', color: '#F59E0B', fontFamily: 'Arial', lineHeight: 1.0 }}>62.3</Text>
+            <Text style={{ fontSize: 15, color: '#64748B', lineHeight: 1.5, marginTop: '10px' }}>12 城全年平均 AQI，整体落在"良"区间——数据有梯度，不是一片绿</Text>
+        </Box>
+        <Box style={{ flex: 1, background: '#FFFFFF', borderRadius: '12px', padding: '20px 20px', justifyContent: 'space-between', boxShadow: '0 4px 20px rgba(14,116,144,0.08)' }}>
+            <Text style={{ fontSize: 34, fontWeight: 'bold', color: '#0E7490', fontFamily: 'Arial', lineHeight: 1.0 }}>40.8 / 82.4</Text>
+            <Text style={{ fontSize: 15, color: '#64748B', lineHeight: 1.5, marginTop: '10px' }}>深圳最优、郑州最差，首尾相差 2 倍——城市选取确实拉开了梯度</Text>
+        </Box>
+        <Box style={{ flex: 1, background: '#FFFFFF', borderRadius: '12px', padding: '20px 20px', justifyContent: 'space-between', boxShadow: '0 4px 20px rgba(14,116,144,0.08)' }}>
+            <Text style={{ fontSize: 44, fontWeight: 'bold', color: '#F59E0B', fontFamily: 'Arial', lineHeight: 1.0 }}>926</Text>
+            <Text style={{ fontSize: 15, color: '#64748B', lineHeight: 1.5, marginTop: '10px' }}>O₃ 作为首要污染物的天数超过 PM2.5 的 640 天——夏季臭氧已成主矛盾</Text>
+        </Box>
+        <Box style={{ flex: 1, background: '#FFFFFF', borderRadius: '12px', padding: '20px 20px', justifyContent: 'space-between', boxShadow: '0 4px 20px rgba(14,116,144,0.08)' }}>
+            <Text style={{ fontSize: 30, fontWeight: 'bold', color: '#0E7490', lineHeight: 1.1 }}>六档全覆盖</Text>
+            <Text style={{ fontSize: 15, color: '#64748B', lineHeight: 1.5, marginTop: '10px' }}>优 1906 · 良 1950 · 轻度 374 · 中度 59 · 重度 35 · 严重 8 天</Text>
+        </Box>
+    </Box>
+
+    <Box style={{ height: '40px', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={{ fontSize: 14, color: '#94A3B8' }}>城市空气质量监测看板</Text>
+        <Text style={{ fontSize: 14, color: '#94A3B8' }}>06 / 07</Text>
+    </Box>
+</Slide>

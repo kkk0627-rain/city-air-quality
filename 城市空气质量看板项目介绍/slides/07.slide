@@ -1,0 +1,24 @@
+<Slide style={{ padding: 0, background: '#0E7490', position: 'relative', overflow: 'hidden' }}>
+    <Image src="assets/end_sky.png" style={{ position: 'absolute', top: 0, left: 0, width: '1280px', height: '720px', objectFit: 'cover' }} />
+    <Box style={{ position: 'absolute', top: 0, left: 0, width: '1280px', height: '720px', background: 'linear-gradient(180deg, rgba(8,47,61,0.45) 0%, rgba(8,47,61,0.78) 100%)' }} />
+
+    <Box style={{ position: 'relative', zIndex: 2, width: '100%', height: '720px', alignItems: 'center', justifyContent: 'center', paddingLeft: '140px', paddingRight: '140px' }}>
+        <Text style={{ fontSize: 14, color: '#7FD1C6', letterSpacing: 6, fontWeight: '600' }}>SUMMARY</Text>
+        <Text style={{ fontSize: 48, fontWeight: 'bold', color: '#FFFFFF', marginTop: '22px', lineHeight: 1.2, textAlign: 'center', textShadow: '0 2px 16px rgba(0,0,0,0.35)' }}>让真实数据自己说话</Text>
+        <Box style={{ width: '80px', height: '4px', background: '#F59E0B', marginTop: '28px' }} />
+        <Text style={{ fontSize: 18, color: '#D6EEEC', marginTop: '30px', textAlign: 'center', lineHeight: 1.7 }}>12 城 · 361 天 · 4,332 条真实观测　|　8 项前端功能 · 4 个后端接口 · 46 项测试全部通过</Text>
+
+        <Box style={{ flexDirection: 'row', gap: '24px', marginTop: '46px' }}>
+            <Box style={{ width: '360px', background: 'rgba(255,255,255,0.12)', borderRadius: '12px', padding: '24px 26px' }}>
+                <Text style={{ fontSize: 17, fontWeight: '600', color: '#FFFFFF' }}>已经做到</Text>
+                <Text style={{ fontSize: 15, color: '#C7E8E4', marginTop: '12px', lineHeight: 1.7 }}>数据来自官方发布、可追溯；全链路自己搭通；看板可筛选、可对比、可下钻到单条记录</Text>
+            </Box>
+            <Box style={{ width: '360px', background: 'rgba(255,255,255,0.12)', borderRadius: '12px', padding: '24px 26px' }}>
+                <Text style={{ fontSize: 17, fontWeight: '600', color: '#FFFFFF' }}>还能更好</Text>
+                <Text style={{ fontSize: 15, color: '#C7E8E4', marginTop: '12px', lineHeight: 1.7 }}>扩展到小时粒度 10 万行、接入实时数据、增加更多城市与污染物对比维度</Text>
+            </Box>
+        </Box>
+
+        <Text style={{ fontSize: 15, color: '#9EC9C4', marginTop: '40px', textAlign: 'center', lineHeight: 1.6 }}>说明：数据集观测区间为 2025-01-01 ~ 2025-12-31，看板呈现的是该区间内的历史数据，非实时数据</Text>
+    </Box>
+</Slide>
