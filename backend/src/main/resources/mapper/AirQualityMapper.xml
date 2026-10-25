@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  任务 10 交付物：AirQualityMapper 的 SQL 实现。
+
+  设计约束（源自 docs/dataset.md 第 7 节）：
+    1. 天粒度下没有聚合查询，全部走索引直查；
+    2. "当前日期"统一取 MAX(monitor_date)，而不是 CURDATE()——数据集截止于 2025-12-31；
+    3. 排行榜必须限定同一 monitor_date，否则各城市拿到的不是同一时刻的快照。
+  列名 -> 属性名依赖 application.yml 的 map-underscore-to-camel-case=true。
+-->
+<mapper namespace="com.aqi.dashboard.mapper.AirQualityMapper">
+
+    <!-- 日报全列：与 entity.AirQuality 的表字段一一对应（不含派生列 city_name） -->
+    <sql id="DailyColumns">
+        id, city_id, monitor_date, pm25, pm10, so2, no2, co, o3, aqi, primary_pollutant, `level`
+    </sql>
+
+    <!-- 数据集当前日期：全表最大监测日，被下面三条查询复用 -->
+    <sql id="MaxDateSubquery">
+        (SELECT MAX(monitor_date) FROM air_quality)
+    </sql>
+
+    <!-- 城市下拉框：12 行 -->
+    <select id="findAllCities" resultType="com.aqi.dashboard.entity.City">
+        SELECT id, city_name, province, region, longitude, latitude
+        FROM city
+        ORDER BY id ASC
+    </select>
+
+    <!-- 单城市查询：主键命中 -->
+    <select id="findCityById" resultType="com.aqi.dashboard.entity.City">
+        SELECT id, city_name, province, region, longitude, latitude
+        FROM city
+        WHERE id = #{id}
+    </select>
+
+    <!-- 当前日期：MAX(monitor_date) 可被 MySQL 优化为索引末位扫描，无需全表 -->
+    <select id="findMaxDate" resultType="java.time.LocalDate">
+        SELECT MAX(monitor_date) FROM air_quality
+    </select>
+
+    <!-- 概览卡：某地最新一天。走 uk_city_date 单行定位 -->
+    <select id="findLatestByCity" resultType="com.aqi.dashboard.entity.AirQuality">
+        SELECT
+        <include refid="DailyColumns"/>
+        FROM air_quality
+        WHERE city_id = #{cityId}
+        AND monitor_date = <include refid="MaxDateSubquery"/>
+    </select>
+
+    <!--
+      趋势图：某城市某区间的逐日数据。
+      BETWEEN 形成 uk_city_date 的范围扫描（EXPLAIN: range），
+      数据集缺失的日期（如 2025-06-04）在区间内自然跳过，前端 X 轴按日期直出即可。
+    -->
+    <select id="findTrend" resultType="com.aqi.dashboard.entity.AirQuality">
+        SELECT
+        <include refid="DailyColumns"/>
+        FROM air_quality
+        WHERE city_id = #{cityId}
+        AND monitor_date BETWEEN #{startDate} AND #{endDate}
+        ORDER BY monitor_date ASC
+    </select>
+
+    <!--
+      排行榜：全城市同一天的横向快照。
+      JOIN city 只为取城市名；city_name 经驼峰映射写入 AirQuality.cityName（非表字段）。
+      次级排序 city_id 保证 AQI 相同时结果稳定，避免 MySQL 返回顺序抖动导致图表跳动。
+    -->
+    <select id="findRankingByDate" resultType="com.aqi.dashboard.entity.AirQuality">
+        SELECT a.city_id, a.monitor_date, a.aqi, a.primary_pollutant, a.`level`, c.city_name
+        FROM air_quality a
+        JOIN city c ON c.id = a.city_id
+        WHERE a.monitor_date = #{monitorDate}
+        ORDER BY a.aqi ASC, a.city_id ASC
+    </select>
+
+    <!--
+      需求 A2~A4：明细列（JOIN city 取城市名）。
+      与 DailyColumns 的区别仅在于多取一列 c.city_name，
+      排行榜那条语句仍沿用旧的精简写法，互不干扰。
+    -->
+    <sql id="DailyJoinColumns">
+        a.id, a.city_id, a.monitor_date, a.pm25, a.pm10, a.so2, a.no2, a.co, a.o3,
+        a.aqi, a.primary_pollutant, a.`level`, c.city_name
+    </sql>
+
+    <!--
+      需求 A2~A4 公共筛选条件。
+      三个查询共享同一段 WHERE，避免以后加筛选项时三处漏改。
+      cityIds 为 null 或空集合 = 不过滤城市（全部）。
+    -->
+    <sql id="QueryConditions">
+        <where>
+            <if test="cityIds != null and cityIds.size() &gt; 0">
+                AND a.city_id IN
+                <foreach collection="cityIds" item="cid" open="(" separator="," close=")">
+                    #{cid}
+                </foreach>
+            </if>
+            <if test="startDate != null">
+                AND a.monitor_date &gt;= #{startDate}
+            </if>
+            <if test="endDate != null">
+                AND a.monitor_date &lt;= #{endDate}
+            </if>
+        </where>
+    </sql>
+
+    <!-- 数据集起始日：与 findMaxDate 成对，构成日期筛选的合法边界 -->
+    <select id="findMinDate" resultType="java.time.LocalDate">
+        SELECT MIN(monitor_date) FROM air_quality
+    </select>
+
+    <!--
+      A2 明细分页（F8 详情表格）。
+      排序：日期倒序（最新在前），同日按城市编号升序——
+      二级排序是为了让 OFFSET 分页结果稳定，否则同日期行可能跨页重复或丢失。
+    -->
+    <select id="findByConditions" resultType="com.aqi.dashboard.entity.AirQuality">
+        SELECT
+        <include refid="DailyJoinColumns"/>
+        FROM air_quality a
+        JOIN city c ON c.id = a.city_id
+        <include refid="QueryConditions"/>
+        ORDER BY a.monitor_date DESC, a.city_id ASC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <!-- A2 分页总数（无需 JOIN city，条件里只用到 air_quality 的列） -->
+    <select id="countByConditions" resultType="long">
+        SELECT COUNT(*)
+        FROM air_quality a
+        <include refid="QueryConditions"/>
+    </select>
+
+    <!--
+      A3 统计明细：不做分页，返回区间内全部行，由 Service 在 Java 侧聚合。
+      见 AirQualityMapper.java 中"设计取舍"注释（避免 ${} 拼列名 / 保持口径单一）。
+    -->
+    <select id="findStatsByConditions" resultType="com.aqi.dashboard.entity.AirQuality">
+        SELECT
+        <include refid="DailyJoinColumns"/>
+        FROM air_quality a
+        JOIN city c ON c.id = a.city_id
+        <include refid="QueryConditions"/>
+        ORDER BY a.city_id ASC, a.monitor_date ASC
+    </select>
+
+    <!-- A4 单条详情：主键定位 -->
+    <select id="findRecordById" resultType="com.aqi.dashboard.entity.AirQuality">
+        SELECT
+        <include refid="DailyJoinColumns"/>
+        FROM air_quality a
+        JOIN city c ON c.id = a.city_id
+        WHERE a.id = #{id}
+    </select>
+
+</mapper>
