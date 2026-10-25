@@ -130,12 +130,14 @@ node server.js
 │   ├── js/app.js                状态编排与渲染
 │   ├── vendor/echarts.min.js    本地 ECharts
 │   └── server.js                零依赖静态服务器（5174）
-├── frontend/                   Vue 3 早期版本（仅作技术栈对照，非交付物）
 ├── db/init.sql                  建库 + 建表 + 导入 4,332 行
 ├── dataset/                     清洗后的 CSV 与数据集元信息
 ├── docs/                        数据集说明、运行指南、AI 使用记录
-├── start-native.cmd             一键启动（原生版）
-└── start.cmd                    一键启动（Vue 版）
+├── 演示PPT/                     答辩 PPT（7 页）及素材
+├── start-native.cmd             一键启动（后端 8080 + 前端 5174）
+├── AI使用记录表.md              课程提交物（= docs/AI_USAGE.md）
+├── Git提交记录.txt              Git 提交历史（24+ 次）
+└── 提交物清单.md                老师要求 → 本目录文件 对照表
 ```
 
 ---
@@ -224,4 +226,5 @@ Swagger UI（后端启动后可直接在浏览器里调试）：
 | [docs/dataset.md](docs/dataset.md) | 数据集来源、清洗规则、字段口径、接口契约 |
 | [docs/AI_USAGE.md](docs/AI_USAGE.md) | **AI 使用记录表**（课程提交物） |
 | [frontend-native/README.md](frontend-native/README.md) | 原生前端结构与实现细节 |
-| [城市空气质量看板项目介绍/](城市空气质量看板项目介绍/) | 答辩 PPT（7 页）及素材 |
+| [演示PPT/](演示PPT/) | 答辩 PPT（7 页）及素材 |
+| [提交物清单.md](提交物清单.md) | 老师要求 → 本目录文件 对照表 |
