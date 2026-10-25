@@ -45,3 +45,5 @@ db/maven_setup.py
 *.tmp
 Thumbs.db
 .DS_Store
+# Office / WPS 打开 PPT、Word、Excel 时生成的临时锁文件
+~$*
