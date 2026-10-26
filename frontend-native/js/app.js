@@ -5,7 +5,9 @@
  *  - 没有虚拟 DOM，因此采用「集中 state + 显式 render」的模式：
  *    所有请求只改 state，改完调用对应的 render*()，避免 DOM 与数据脱节；
  *  - 事件一律用委托绑在容器上（城市/指标是动态生成的），容器本身静态存在于 HTML；
- *  - 每个请求各自维护 busy 计数，用于按钮禁用，避免并发时按钮闪烁。
+ *  - 每个请求各自维护 busy 计数，用于按钮禁用，避免并发时按钮闪烁；
+ *  - Tab 只是显示/隐藏 section，不重建 DOM；切回来时必须 resizeAll()，
+ *    否则隐藏期间容器宽度为 0，ECharts 会按 0 宽高渲染成空白。
  */
 (function (global) {
   'use strict';
@@ -15,6 +17,26 @@
 
   /** F8 需求指定：每页 10 条 */
   var PAGE_SIZE = 10;
+
+  /** 综合指数的定性分档：用于 KPI 卡配色与顶栏综合评级 */
+  var CI_BANDS = [
+    { max: 2.2, label: '优', tone: 'kpi-good' },
+    { max: 2.8, label: '良', tone: 'kpi-good' },
+    { max: 3.4, label: '一般', tone: 'kpi-warn' },
+    { max: 4.0, label: '较差', tone: 'kpi-bad' },
+    { max: Infinity, label: '差', tone: 'kpi-bad' }
+  ];
+
+  function bandOf(ci) {
+    if (ci === null || ci === undefined || isNaN(Number(ci))) {
+      return { label: '—', tone: 'kpi-slate' };
+    }
+    var v = Number(ci);
+    for (var i = 0; i < CI_BANDS.length; i++) {
+      if (v < CI_BANDS[i].max) return CI_BANDS[i];
+    }
+    return CI_BANDS[CI_BANDS.length - 1];
+  }
 
   // ----------------------------------------------------------------
   // 状态
@@ -26,8 +48,11 @@
     range: { min: '', max: '' },
     filter: { cityIds: [], metric: 'aqi', start: '', end: '' },
     page: 1,
+    tab: 'overview',
     stats: [],
     series: { dates: [], series: [] },
+    analysis: null,
+    profileSort: { key: 'rank', dir: 'asc' },
     pageData: { total: 0, page: 1, size: PAGE_SIZE, list: [] },
     overview: null,
     detail: null,
@@ -41,12 +66,19 @@
 
   var el = {};
   var IDS = [
-    'dataMax', 'btnRefresh', 'errorBar', 'cityCount', 'cityChips', 'metricChips',
-    'rangeText', 'startDate', 'endDate', 'btnSearch', 'filterHint', 'kpiRow',
-    'focusCard', 'focusHint', 'overviewCard', 'trendTitle', 'trendRange',
-    'trendChart', 'trendEmpty', 'compareHint', 'compareChart', 'compareEmpty',
-    'pieChart', 'pieEmpty', 'thMetric', 'tableBody', 'btnPrev', 'btnNext',
-    'pageInfo', 'detailCard', 'detailId', 'detailGrid', 'btnCloseDetail'
+    'dataMax', 'verdictValue', 'btnRefresh', 'errorBar', 'cityCount', 'cityChips',
+    'metricChips', 'rangeText', 'startDate', 'endDate', 'btnSearch', 'filterHint',
+    'kpiRow', 'tabs', 'focusCard', 'focusHint', 'overviewCard',
+    'trendTitle', 'trendRange', 'trendChart', 'trendEmpty',
+    'pieChart', 'pieEmpty', 'monthChart', 'monthEmpty',
+    'rankChart', 'rankEmpty', 'radarChart', 'radarEmpty', 'radarHint',
+    'compareMetric', 'compareHint', 'compareChart', 'compareEmpty',
+    'profileTable', 'profileBody',
+    'regionChart', 'regionEmpty', 'seasonChart', 'seasonEmpty',
+    'pollutantChart', 'pollutantEmpty', 'levelHint', 'levelBarChart', 'levelBarEmpty',
+    'heatmapChart', 'heatmapEmpty',
+    'thMetric', 'tableBody', 'btnPrev', 'btnNext', 'pageInfo',
+    'detailCard', 'detailId', 'detailGrid', 'btnCloseDetail'
   ];
 
   function cacheDom() {
@@ -105,6 +137,16 @@
     if (m.length < 2) m = '0' + m;
     if (d.length < 2) d = '0' + d;
     return y + '-' + m + '-' + d;
+  }
+
+  function num(value) {
+    return (value === null || value === undefined || value === '') ? null : Number(value);
+  }
+
+  function fmt(value, digits) {
+    var v = num(value);
+    if (v === null || isNaN(v)) return '—';
+    return digits === undefined ? String(v) : v.toFixed(digits);
   }
 
   // ----------------------------------------------------------------
@@ -239,9 +281,27 @@
     }
   }
 
+  /** 综合分析：一次拿到对比 + 分类两个 Tab 的全部数据 */
+  async function loadAnalysis() {
+    enterBusy();
+    try {
+      state.analysis = await Api.getAnalysis(params());
+    } catch (e) {
+      state.analysis = null;
+      setError(e.message);
+    } finally {
+      leaveBusy();
+      renderAnalysis();
+      renderKpis();
+      renderVerdict();
+    }
+  }
+
   function reloadAll() {
     setError('');
-    return Promise.all([loadStats(), loadSeries(), loadRecords(), loadOverview()]);
+    return Promise.all([
+      loadStats(), loadSeries(), loadRecords(), loadOverview(), loadAnalysis()
+    ]);
   }
 
   // ----------------------------------------------------------------
@@ -257,7 +317,7 @@
     var selected = selectedKeySet();
 
     if (state.cities.length === 0) {
-      el.cityChips.innerHTML = '<span class="empty">加载中…</span>';
+      el.cityChips.innerHTML = '<span class="muted">加载中…</span>';
     } else {
       el.cityChips.innerHTML = state.cities.map(function (city) {
         var active = selected[String(city.code)] ? ' active' : '';
@@ -299,62 +359,153 @@
       el.endDate.max = state.range.max || '';
       el.endDate.value = state.filter.end || '';
     }
+    var days = '';
+    if (state.filter.start && state.filter.end) {
+      var a = new Date(state.filter.start + 'T00:00:00');
+      var b = new Date(state.filter.end + 'T00:00:00');
+      var span = Math.round((b - a) / 86400000) + 1;
+      if (span > 0) days = '（' + span + ' 天）';
+    }
     if (el.rangeText) {
-      el.rangeText.textContent = (state.range.min || '—') + ' ~ ' + (state.range.max || '—');
+      el.rangeText.textContent = (state.range.min || '—') + ' ~ ' + (state.range.max || '—') + days;
     }
   }
 
   // ----------------------------------------------------------------
-  // 渲染：主区域
+  // 渲染：KPI 卡行
   // ----------------------------------------------------------------
+
+  function renderVerdict() {
+    if (!el.verdictValue) return;
+    var a = state.analysis;
+    var avgAqi = null;
+    if (a && a.cities && a.cities.length) {
+      var sum = 0, n = 0;
+      a.cities.forEach(function (c) {
+        var v = num(c.aqi);
+        if (v !== null) { sum += v; n++; }
+      });
+      if (n) avgAqi = sum / n;
+    } else if (state.stats && state.stats.length && state.filter.metric === 'aqi') {
+      var s = 0, m = 0;
+      state.stats.forEach(function (r) {
+        var v = num(r.avg);
+        if (v !== null) { s += v; m++; }
+      });
+      if (m) avgAqi = s / m;
+    }
+    if (avgAqi === null) {
+      el.verdictValue.textContent = '—';
+      return;
+    }
+    var meta = Api.getLevelMeta(Math.round(avgAqi));
+    el.verdictValue.textContent = meta.label + ' · ' + avgAqi.toFixed(0);
+    el.verdictValue.style.color = meta.color === '#FFFF00' ? '#fde047' : meta.color;
+  }
 
   function renderKpis() {
     if (!el.kpiRow) return;
-    var rows = state.stats || [];
+    var a = state.analysis;
+    var cities = (a && a.cities) || [];
     var meta = Api.getMetricMeta(state.filter.metric);
-    var unit = meta.unit ? ' ' + meta.unit : '';
+    var unit = meta.unit ? '<span class="unit">' + esc(meta.unit) + '</span>' : '';
 
-    if (rows.length === 0) {
-      el.kpiRow.innerHTML = [
-        { label: '覆盖城市', value: '—' },
-        { label: meta.label + ' 均值', value: '—' },
-        { label: '优良天数占比', value: '—' },
-        { label: '污染最重城市', value: '—' }
-      ].map(kpiHtml).join('');
-      return;
+    // ---- 1) 综合指数：所选城市的均值 ----
+    var ciAvg = null;
+    if (cities.length) {
+      var sum = 0, n = 0;
+      cities.forEach(function (c) {
+        var v = num(c.compositeIndex);
+        if (v !== null) { sum += v; n++; }
+      });
+      if (n) ciAvg = sum / n;
+    }
+    var ciBand = bandOf(ciAvg);
+
+    // ---- 2) 当前指标均值（沿用 A3） ----
+    var statAvgs = (state.stats || [])
+      .map(function (r) { return num(r.avg); })
+      .filter(function (v) { return v !== null && !isNaN(v); });
+    var mean = statAvgs.length
+      ? (statAvgs.reduce(function (x, y) { return x + y; }, 0) / statAvgs.length).toFixed(1)
+      : null;
+
+    // ---- 3) 优良率 ----
+    var goodRatio = null;
+    if (cities.length) {
+      var goodDays = cities.reduce(function (s, c) { return s + (Number(c.goodDays) || 0); }, 0);
+      var samples = cities.reduce(function (s, c) { return s + (Number(c.samples) || 0); }, 0);
+      if (samples) goodRatio = (goodDays * 100) / samples;
     }
 
-    var avgs = rows
-      .map(function (row) {
-        return (row.avg === null || row.avg === undefined) ? null : Number(row.avg);
-      })
-      .filter(function (value) { return value !== null && !isNaN(value); });
+    // ---- 5) 首要污染物：取天数最多的那一项（"无"要单独处理，它表示没有超标项） ----
+    var top = null;
+    if (a && a.pollutants && a.pollutants.length) {
+      var ranked = a.pollutants.filter(function (p) { return p.name !== '无'; });
+      top = ranked.length ? ranked[0] : a.pollutants[0];
+    }
 
-    var mean = avgs.length
-      ? (avgs.reduce(function (a, b) { return a + b; }, 0) / avgs.length).toFixed(1) + unit
-      : '—';
+    // ---- 6) 最清洁 / 最污染（按综合指数） ----
+    var cleanest = cities.length ? cities[0] : null;
+    var dirtiest = cities.length ? cities[cities.length - 1] : null;
 
-    var good = rows.reduce(function (sum, row) { return sum + (Number(row.goodDays) || 0); }, 0);
-    var samples = rows.reduce(function (sum, row) { return sum + (Number(row.samples) || 0); }, 0);
-    var ratio = samples > 0 ? ((good * 100) / samples).toFixed(1) + '%' : '—';
+    var cards = [
+      {
+        cls: ciBand.tone,
+        label: '综合指数（越小越清洁）',
+        value: ciAvg === null ? '—' : ciAvg.toFixed(2),
+        sub: ciBand.label === '—' ? '需完整六项浓度' : '整体' + ciBand.label
+      },
+      {
+        cls: 'kpi-slate',
+        label: meta.label + ' 均值',
+        value: mean === null ? '—' : mean,
+        unit: unit,
+        sub: state.stats.length ? state.stats.length + ' 城平均' : '—'
+      },
+      {
+        cls: 'kpi-teal',
+        label: '优良天数占比',
+        value: goodRatio === null ? '—' : goodRatio.toFixed(1) + '%',
+        bar: goodRatio === null ? null : goodRatio
+      },
+      {
+        cls: 'kpi-slate',
+        label: '样本量',
+        value: a ? String(a.samples) : '—',
+        sub: cities.length + ' 城 · ' + (a ? a.samples === 0 ? 0 : Math.round(a.samples / Math.max(cities.length, 1)) : 0) + ' 天/城'
+      },
+      {
+        cls: top && top.name === '无' ? 'kpi-good' : 'kpi-warn',
+        label: '主要首要污染物',
+        value: top ? top.name : '—',
+        sub: top ? top.days + ' 天（' + fmt(top.ratio, 1) + '%）' : '—'
+      },
+      {
+        cls: 'kpi-slate',
+        label: '最清洁 ↔ 最污染',
+        value: cleanest && dirtiest ? (cleanest.city + ' ↔ ' + dirtiest.city) : '—',
+        sub: cleanest && dirtiest
+          ? ('指数 ' + fmt(cleanest.compositeIndex, 2) + ' ↔ ' + fmt(dirtiest.compositeIndex, 2))
+          : '—'
+      }
+    ];
 
-    var worst = rows
-      .filter(function (row) { return row.avg !== null && row.avg !== undefined; })
-      .slice()
-      .sort(function (a, b) { return Number(b.avg) - Number(a.avg); })[0];
-
-    el.kpiRow.innerHTML = [
-      { label: '覆盖城市', value: rows.length + ' 个' },
-      { label: meta.label + ' 均值', value: mean },
-      { label: '优良天数占比', value: ratio },
-      { label: '污染最重城市', value: worst ? (worst.city + ' ' + worst.avg) : '—' }
-    ].map(kpiHtml).join('');
+    el.kpiRow.innerHTML = cards.map(function (c) {
+      return '<div class="kpi ' + c.cls + '">' +
+        '<span class="kpi-label">' + esc(c.label) + '</span>' +
+        '<span class="kpi-value">' + esc(c.value) + (c.unit || '') + '</span>' +
+        (c.bar !== null && c.bar !== undefined
+          ? '<span class="kpi-bar"><i style="width:' + Math.max(0, Math.min(100, c.bar)) + '%"></i></span>' +
+            '<span class="kpi-sub">优+良天数 / 总天数</span>'
+          : '<span class="kpi-sub">' + esc(c.sub || '') + '</span>') +
+        '</div>';
+    }).join('');
   }
 
-  function kpiHtml(item) {
-    return '<div class="kpi"><span class="kpi-label">' + esc(item.label) +
-      '</span><span class="kpi-value">' + esc(item.value) + '</span></div>';
-  }
+  // ----------------------------------------------------------------
+  // 渲染：总览
+  // ----------------------------------------------------------------
 
   function renderOverview() {
     if (!el.focusCard) return;
@@ -416,13 +567,12 @@
 
   function renderStats() {
     var meta = Api.getMetricMeta(state.filter.metric);
-    if (el.compareHint) el.compareHint.textContent = meta.label + ' 时段均值';
+    if (el.compareHint) el.compareHint.textContent = meta.label + ' 时段均值，柱色=该城众数等级';
+    if (el.compareMetric) el.compareMetric.textContent = meta.label;
     if (el.thMetric) {
       el.thMetric.innerHTML = esc(meta.label) +
         (meta.unit ? '<span class="unit">' + esc(meta.unit) + '</span>' : '');
     }
-
-    renderKpis();
 
     if (state.stats.length === 0) {
       show(el.compareEmpty, true);
@@ -441,6 +591,132 @@
     Charts.renderPie(state.stats);
   }
 
+  // ----------------------------------------------------------------
+  // 渲染：对比 + 分类（均由 /analysis 驱动）
+  // ----------------------------------------------------------------
+
+  function renderAnalysis() {
+    var a = state.analysis;
+    var hasData = !!(a && a.cities && a.cities.length > 0);
+
+    // --- 对比 Tab ---
+    toggleChart(el.rankChart, el.rankEmpty, hasData);
+    toggleChart(el.radarChart, el.radarEmpty, hasData);
+    if (hasData) {
+      Charts.renderRank(a.cities);
+      Charts.renderRadar(a.cities.slice(0, 6));
+      if (el.radarHint) {
+        el.radarHint.textContent = a.cities.length > 6
+          ? '取综合指数前 6 城 · 1.0 = 达标线'
+          : '六项浓度 / 二级标准限值，1.0 = 达标线';
+      }
+    }
+    renderProfileTable();
+
+    // --- 分类 Tab ---
+    var hasRegion = hasData && !!(a.regions && a.regions.length);
+    var hasSeason = hasData && !!(a.seasons && a.seasons.length);
+    var hasPollutant = hasData && !!(a.pollutants && a.pollutants.length);
+    var hasLevels = hasData && !!(a.levels && a.levels.length);
+    var hasHeat = hasData && !!(a.monthly && a.monthly.length);
+
+    toggleChart(el.regionChart, el.regionEmpty, hasRegion);
+    toggleChart(el.seasonChart, el.seasonEmpty, hasSeason);
+    toggleChart(el.pollutantChart, el.pollutantEmpty, hasPollutant);
+    toggleChart(el.levelBarChart, el.levelBarEmpty, hasLevels);
+    toggleChart(el.heatmapChart, el.heatmapEmpty, hasHeat);
+
+    if (hasRegion) Charts.renderRegion(a.regions);
+    if (hasSeason) Charts.renderSeason(a.seasons);
+    if (hasPollutant) Charts.renderPollutant(a.pollutants);
+    if (hasLevels) {
+      Charts.renderLevelBar(a.levels);
+      if (el.levelHint) {
+        var good = a.levels[0] && a.levels[1]
+          ? (Number(a.levels[0].ratio || 0) + Number(a.levels[1].ratio || 0)).toFixed(1)
+          : '—';
+        el.levelHint.textContent = '国标 HJ 633-2012 · 优良合计 ' + good + '%';
+      }
+    }
+    if (hasHeat) {
+      // 热力图的城市顺序按综合指数排名，读图时"上面更干净"，与排名图一致
+      var order = {};
+      a.cities.forEach(function (c) { order[c.city] = c.rank; });
+      var cells = a.monthly.slice().sort(function (x, y) {
+        return (order[x.city] || 99) - (order[y.city] || 99);
+      });
+      Charts.renderHeatmap(cells);
+    }
+
+    // --- 总览的月度走势 ---
+    var hasMonth = hasData && !!(a.monthlyTrend && a.monthlyTrend.length);
+    toggleChart(el.monthChart, el.monthEmpty, hasMonth);
+    if (hasMonth) Charts.renderMonth(a.monthlyTrend);
+  }
+
+  function toggleChart(chartNode, emptyNode, hasData) {
+    if (emptyNode) show(emptyNode, !hasData);
+    if (chartNode) chartNode.style.display = hasData ? '' : 'none';
+  }
+
+  /** 城市综合档案表：支持点表头排序 */
+  function renderProfileTable() {
+    if (!el.profileBody) return;
+    var a = state.analysis;
+    var rows = (a && a.cities) ? a.cities.slice() : [];
+
+    if (rows.length === 0) {
+      el.profileBody.innerHTML =
+        '<tr><td colspan="9" class="placeholder">当前筛选条件下没有数据</td></tr>';
+      return;
+    }
+
+    var sortKey = state.profileSort.key;
+    var dir = state.profileSort.dir === 'asc' ? 1 : -1;
+    rows.sort(function (x, y) {
+      var xv = x[sortKey];
+      var yv = y[sortKey];
+      if (sortKey === 'city' || sortKey === 'region') {
+        return String(xv).localeCompare(String(yv), 'zh-CN') * dir;
+      }
+      var xn = num(xv);
+      var yn = num(yv);
+      if (xn === null && yn === null) return 0;
+      if (xn === null) return 1;
+      if (yn === null) return -1;
+      return (xn - yn) * dir;
+    });
+
+    el.profileBody.innerHTML = rows.map(function (c) {
+      var ciBand = bandOf(c.compositeIndex);
+      return '<tr data-code="' + esc(c.code) + '">' +
+        '<td><span class="' + (medal ? 'rank-medal r' + c.rank : '') + '">' + esc(c.rank) + '</span></td>' +
+        '<td><b>' + esc(c.city) + '</b></td>' +
+        '<td>' + esc(c.region) + '</td>' +
+        '<td class="num"><b>' + fmt(c.compositeIndex, 2) + '</b></td>' +
+        '<td class="num">' + fmt(c.aqi, 1) + '</td>' +
+        '<td class="num">' + fmt(c.pm25, 1) + '</td>' +
+        '<td class="num">' + fmt(c.pm10, 1) + '</td>' +
+        '<td class="num">' + fmt(c.o3, 1) + '</td>' +
+        '<td class="num">' + fmt(c.goodRatio, 1) + '%' +
+          '<span class="kpi-sub">' + ciBand.label + '</span></td>' +
+        '</tr>';
+    }).join('');
+
+    // 表头排序箭头
+    var ths = el.profileTable ? el.profileTable.querySelectorAll('th[data-sort]') : [];
+    ths.forEach(function (th) {
+      th.classList.remove('sorted-asc', 'sorted-desc');
+      if (th.getAttribute('data-sort') === sortKey) {
+        th.classList.add(state.profileSort.dir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+      }
+    });
+  }
+
+  // ----------------------------------------------------------------
+  // 渲染：明细（F8）
+  // ----------------------------------------------------------------
+
   function renderTable() {
     if (!el.tableBody) return;
     var rows = state.pageData.list || [];
@@ -450,7 +726,8 @@
     var page = Number(state.pageData.page) || 1;
 
     if (rows.length === 0) {
-      el.tableBody.innerHTML = '<tr><td colspan="5" class="placeholder">当前筛选条件下没有数据</td></tr>';
+      el.tableBody.innerHTML =
+        '<tr><td colspan="6" class="placeholder">当前筛选条件下没有数据</td></tr>';
     } else {
       el.tableBody.innerHTML = rows.map(function (row) {
         var level = Api.getLevelMetaByLevel(row.level);
@@ -464,6 +741,7 @@
           '<td class="num">' + esc(row.aqi) + '</td>' +
           '<td><span class="badge" style="background:' + bg + ';color:' + fg + '">' +
             esc(row.levelLabel) + '</span></td>' +
+          '<td>' + esc(Api.formatPrimary(row.primaryPollutant)) + '</td>' +
         '</tr>';
       }).join('');
     }
@@ -502,6 +780,30 @@
     el.detailGrid.innerHTML = items.map(function (pair) {
       return '<div><dt>' + pair[0] + '</dt><dd>' + pair[1] + '</dd></div>';
     }).join('');
+  }
+
+  // ----------------------------------------------------------------
+  // Tab 切换
+  // ----------------------------------------------------------------
+
+  function switchTab(name) {
+    state.tab = name;
+
+    var tabs = el.tabs ? el.tabs.querySelectorAll('.tab') : [];
+    tabs.forEach(function (tab) {
+      tab.classList.toggle('is-active', tab.getAttribute('data-tab') === name);
+    });
+
+    var views = document.querySelectorAll('.view');
+    views.forEach(function (view) {
+      var match = view.getAttribute('data-view') === name;
+      if (match) view.removeAttribute('hidden');
+      else view.setAttribute('hidden', 'hidden');
+    });
+
+    // 隐藏期间容器宽度为 0，ECharts 会按 0 宽高渲染 —— 切回来必须 resize
+    // 用 setTimeout 让浏览器先完成布局，否则仍可能读到 0
+    setTimeout(function () { Charts.resizeAll(); }, 30);
   }
 
   // ----------------------------------------------------------------
@@ -590,6 +892,31 @@
       reloadAll();
     });
 
+    // Tab
+    if (el.tabs) {
+      el.tabs.addEventListener('click', function (event) {
+        var tab = event.target.closest('[data-tab]');
+        if (!tab) return;
+        switchTab(tab.getAttribute('data-tab'));
+      });
+    }
+
+    // 综合档案表排序
+    if (el.profileTable) {
+      el.profileTable.addEventListener('click', function (event) {
+        var th = event.target.closest('th[data-sort]');
+        if (!th) return;
+        var key = th.getAttribute('data-sort');
+        if (state.profileSort.key === key) {
+          state.profileSort.dir = state.profileSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.profileSort.key = key;
+          state.profileSort.dir = (key === 'city' || key === 'region') ? 'asc' : 'asc';
+        }
+        renderProfileTable();
+      });
+    }
+
     // 翻页
     el.btnPrev.addEventListener('click', function () {
       if (state.page <= 1) return;
@@ -633,6 +960,7 @@
     renderMetricChips();
     renderKpis();
     renderTable();
+    renderProfileTable();
     renderBusy();
 
     await loadBase();

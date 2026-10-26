@@ -159,6 +159,39 @@ public class AirQualityQueryController {
     }
 
     /**
+     * 综合分析（扩展能力，非课程硬性要求）：一次返回对比与分类所需的全部聚合结果。
+     *
+     * <p>与 A3 的区别：A3 只统计"某一个指标"，这里回答的是
+     * "哪座城市综合最好""哪个区域最差""哪个季节污染最重""主要污染物是什么"这类判断问题。</p>
+     *
+     * <p>核心指标是<b>环境空气质量综合指数</b>（六项污染物浓度 / GB 3095-2012
+     * 二级标准限值之和），<b>数值越小越清洁</b>。它不像 AQI 那样被单个污染物"一票否决"，
+     * 因此更适合做城际排名。</p>
+     *
+     * @param cityIds 城市编号，逗号分隔；省略 = 全部城市
+     * @param start   起始日期
+     * @param end     截止日期
+     * @return 综合分析结果
+     */
+    @Operation(summary = "综合分析（综合指数 / 排名 / 区域 / 季节 / 污染物）",
+            description = "返回城市综合指数与排名、六项单项质量指数（雷达图）、"
+                    + "城市×月份 AQI 矩阵（热力图）、区域与季节分组统计、"
+                    + "首要污染物分布与六档等级分布。"
+                    + "综合指数越小越清洁。")
+    @GetMapping("/analysis")
+    public Result<AirQualityService.AnalysisVO> analysis(
+            @Parameter(description = "城市编号，逗号分隔；省略 = 全部城市", example = "1,5,9")
+            @RequestParam(value = "cityIds", required = false) List<Integer> cityIds,
+            @Parameter(description = "起始日期 yyyy-MM-dd", example = "2025-01-01")
+            @RequestParam(value = "start", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @Parameter(description = "截止日期 yyyy-MM-dd", example = "2025-12-31")
+            @RequestParam(value = "end", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        return Result.ok(airQualityService.getAnalysis(cityIds, start, end));
+    }
+
+    /**
      * A4：按主键查询单条日报详情。
      *
      * @param id 记录主键

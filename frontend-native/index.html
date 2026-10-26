@@ -9,141 +9,307 @@
 <body>
   <!--
     原生版看板首页（F1）。
-    布局：顶部标题栏 / 左侧筛选区（F2 F3 F4）/ 右侧主区域（F5 F6 F7 F8）。
+
+    布局自上而下：
+      顶栏        —— 标题、数据截止、综合结论徽章、刷新
+      筛选条      —— 城市(F2) / 指标(F3) / 时间(F4)，横向排布，不再占用侧栏宽度
+      KPI 卡行    —— 综合指数、AQI、优良率、覆盖城市、首要污染物、最清洁/最污染
+      Tab 导航    —— 总览 / 对比 / 分类 / 明细
+      视图区      —— 每个 Tab 一个 section，图表按需初始化
+
+    课程要求的 F1~F8 挂载点全部保留：
+      F5 趋势折线 trendChart / F6 城市对比 compareChart / F7 等级环形 pieChart
+      F8 明细表 tableBody + 分页
+    其余为扩展能力：综合指数排名、污染物雷达、区域/季节分类、城市×月份热力图。
+
     所有 DOM 由 app.js 填充，本文件只提供骨架与挂载点。
   -->
-  <div class="page">
-    <header class="page-header">
-      <div>
-        <h1>城市空气质量看板</h1>
-        <p class="sub">
-          数据源：中国环境监测总站 · 全年日均监测值 · 数据截止 <span id="dataMax">—</span>
-        </p>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">AQ</div>
+        <div class="brand-text">
+          <h1>城市空气质量看板</h1>
+          <p>
+            中国环境监测总站 · 2025 全年日均监测值 · 数据截止
+            <b id="dataMax">—</b>
+          </p>
+        </div>
       </div>
-      <button id="btnRefresh" class="refresh" type="button">刷新</button>
+      <div class="top-actions">
+        <div class="verdict" id="verdict">
+          <span class="verdict-label">综合评级</span>
+          <span class="verdict-value" id="verdictValue">—</span>
+        </div>
+        <button id="btnRefresh" class="btn btn-ghost" type="button">刷新</button>
+      </div>
     </header>
 
     <p id="errorBar" class="error-bar" hidden></p>
 
-    <div class="layout">
-      <aside class="sidebar">
-        <section class="filter-panel">
-          <div class="block">
-            <div class="block-head">
-              <span class="label">城市</span>
-              <span class="count" id="cityCount">已选 0 / 0</span>
-            </div>
-            <div class="chips" id="cityChips">
-              <span class="empty">加载中…</span>
-            </div>
-            <div class="ops">
-              <button type="button" class="link" data-act="city-all">全选</button>
-              <button type="button" class="link" data-act="city-none">清空</button>
-            </div>
-          </div>
+    <!-- ============ 筛选条（F2 F3 F4） ============ -->
+    <section class="filterbar">
+      <div class="fb-row">
+        <span class="fb-label">城市<em id="cityCount">0 / 0</em></span>
+        <div class="chips" id="cityChips"><span class="muted">加载中…</span></div>
+        <div class="fb-ops">
+          <button type="button" class="btn btn-mini" data-act="city-all">全选</button>
+          <button type="button" class="btn btn-mini" data-act="city-none">清空</button>
+        </div>
+      </div>
 
-          <div class="block">
-            <div class="block-head">
-              <span class="label">指标</span>
-            </div>
-            <div class="chips" id="metricChips"></div>
-          </div>
+      <div class="fb-row">
+        <span class="fb-label">指标</span>
+        <div class="chips" id="metricChips"></div>
+      </div>
 
-          <div class="block">
-            <div class="block-head">
-              <span class="label">时间范围</span>
-              <span class="count" id="rangeText">— ~ —</span>
-            </div>
-            <div class="dates">
-              <input type="date" id="startDate" />
-              <span class="sep">至</span>
-              <input type="date" id="endDate" />
-            </div>
-            <div class="ops" id="quickOps">
-              <button type="button" class="link" data-days="7">近 7 天</button>
-              <button type="button" class="link" data-days="30">近 30 天</button>
-              <button type="button" class="link" data-days="90">近 90 天</button>
-              <button type="button" class="link" data-days="365">全年</button>
-            </div>
-          </div>
+      <div class="fb-row">
+        <span class="fb-label">时间<em id="rangeText">— ~ —</em></span>
+        <div class="dates">
+          <input type="date" id="startDate" />
+          <span class="sep">至</span>
+          <input type="date" id="endDate" />
+        </div>
+        <div class="fb-ops" id="quickOps">
+          <button type="button" class="btn btn-mini" data-days="7">近 7 天</button>
+          <button type="button" class="btn btn-mini" data-days="30">近 30 天</button>
+          <button type="button" class="btn btn-mini" data-days="90">近 90 天</button>
+          <button type="button" class="btn btn-mini" data-days="365">全年</button>
+        </div>
+        <button id="btnSearch" class="btn btn-primary" type="button">查询</button>
+      </div>
 
-          <button id="btnSearch" class="primary" type="button">查询</button>
-          <p id="filterHint" class="hint" hidden></p>
-        </section>
-      </aside>
+      <p id="filterHint" class="hint" hidden></p>
+    </section>
 
-      <main class="content">
-        <section class="kpi-row" id="kpiRow"></section>
+    <!-- ============ KPI 卡行 ============ -->
+    <section class="kpi-row" id="kpiRow"></section>
 
-        <section class="card" id="focusCard" hidden>
-          <h2>
-            焦点城市
-            <span class="hint" id="focusHint">—</span>
-          </h2>
-          <div class="overview-card" id="overviewCard">
-            <div class="placeholder">暂无数据</div>
-          </div>
-        </section>
+    <!-- ============ Tab 导航 ============ -->
+    <nav class="tabs" id="tabs">
+      <button type="button" class="tab is-active" data-tab="overview">总览</button>
+      <button type="button" class="tab" data-tab="compare">对比</button>
+      <button type="button" class="tab" data-tab="classify">分类</button>
+      <button type="button" class="tab" data-tab="detail">明细</button>
+    </nav>
 
-        <section class="card">
-          <h2>
-            <span id="trendTitle">AQI 趋势</span>
+    <!-- ============ 视图：总览 ============ -->
+    <section class="view" data-view="overview">
+      <div class="card focus-card" id="focusCard" hidden>
+        <div class="card-head">
+          <h2>焦点城市</h2>
+          <span class="hint" id="focusHint">—</span>
+        </div>
+        <div class="overview-card" id="overviewCard"><div class="placeholder">暂无数据</div></div>
+      </div>
+
+      <div class="grid grid-2-1">
+        <div class="card">
+          <div class="card-head">
+            <h2><span id="trendTitle">AQI 趋势</span></h2>
             <span class="hint" id="trendRange">全域</span>
-          </h2>
+          </div>
           <div class="chart-box">
             <div class="chart" id="trendChart"></div>
             <p class="empty" id="trendEmpty" hidden>当前筛选条件下没有数据</p>
           </div>
-        </section>
-
-        <div class="grid-2">
-          <section class="card">
-            <h2>城市对比<span class="hint" id="compareHint">AQI 时段均值</span></h2>
-            <div class="chart-box">
-              <div class="chart" id="compareChart"></div>
-              <p class="empty" id="compareEmpty" hidden>当前筛选条件下没有数据</p>
-            </div>
-          </section>
-
-          <section class="card">
-            <h2>等级分布<span class="hint">六档天数占比</span></h2>
-            <div class="chart-box">
-              <div class="chart" id="pieChart"></div>
-              <p class="empty" id="pieEmpty" hidden>当前筛选条件下没有数据</p>
-            </div>
-          </section>
         </div>
 
-        <section class="card">
-          <h2>数据详情<span class="hint">每页 10 条</span></h2>
-          <div class="table-wrap">
-            <table class="detail-table">
-              <thead>
-                <tr>
-                  <th>城市</th>
-                  <th>日期</th>
-                  <th class="num" id="thMetric">AQI</th>
-                  <th class="num">AQI</th>
-                  <th>等级</th>
-                </tr>
-              </thead>
-              <tbody id="tableBody"></tbody>
-            </table>
-            <div class="pager">
-              <button id="btnPrev" class="page-btn" type="button">上一页</button>
-              <span class="page-info" id="pageInfo">第 1 / 1 页 · 共 0 条</span>
-              <button id="btnNext" class="page-btn" type="button">下一页</button>
-            </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>空气质量等级分布</h2>
+            <span class="hint">六档天数占比</span>
           </div>
-        </section>
+          <div class="chart-box">
+            <div class="chart" id="pieChart"></div>
+            <p class="empty" id="pieEmpty" hidden>当前筛选条件下没有数据</p>
+          </div>
+        </div>
+      </div>
 
-        <section class="card" id="detailCard" hidden>
-          <h2>记录详情<span class="hint" id="detailId">—</span></h2>
-          <dl class="detail-grid" id="detailGrid"></dl>
-          <button class="link" type="button" id="btnCloseDetail">收起</button>
-        </section>
-      </main>
-    </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>月度走势</h2>
+          <span class="hint">所选城市合并后的 AQI 月均值，看季节性</span>
+        </div>
+        <div class="chart-box">
+          <div class="chart chart-sm" id="monthChart"></div>
+          <p class="empty" id="monthEmpty" hidden>当前筛选条件下没有数据</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：对比 ============ -->
+    <section class="view" data-view="compare" hidden>
+      <div class="grid grid-1-1">
+        <div class="card">
+          <div class="card-head">
+            <h2>城市综合指数排名</h2>
+            <span class="hint">数值越小越清洁</span>
+          </div>
+          <div class="chart-box">
+            <div class="chart" id="rankChart"></div>
+            <p class="empty" id="rankEmpty" hidden>当前筛选条件下没有数据</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>污染物构成对比</h2>
+            <span class="hint" id="radarHint">六项浓度 / 二级标准限值，1.0 = 达标线</span>
+          </div>
+          <div class="chart-box">
+            <div class="chart" id="radarChart"></div>
+            <p class="empty" id="radarEmpty" hidden>当前筛选条件下没有数据</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>城市对比 · <span id="compareMetric">AQI</span></h2>
+          <span class="hint" id="compareHint">AQI 时段均值</span>
+        </div>
+        <div class="chart-box">
+          <div class="chart" id="compareChart"></div>
+          <p class="empty" id="compareEmpty" hidden>当前筛选条件下没有数据</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>城市综合档案</h2>
+          <span class="hint">按综合指数升序，点表头可排序</span>
+        </div>
+        <div class="table-wrap">
+          <table class="detail-table sortable" id="profileTable">
+            <thead>
+              <tr>
+                <th data-sort="rank">排名</th>
+                <th data-sort="city">城市</th>
+                <th data-sort="region">区域</th>
+                <th class="num" data-sort="compositeIndex">综合指数</th>
+                <th class="num" data-sort="aqi">AQI</th>
+                <th class="num" data-sort="pm25">PM2.5</th>
+                <th class="num" data-sort="pm10">PM10</th>
+                <th class="num" data-sort="o3">O₃</th>
+                <th class="num" data-sort="goodRatio">优良率</th>
+              </tr>
+            </thead>
+            <tbody id="profileBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：分类 ============ -->
+    <section class="view" data-view="classify" hidden>
+      <div class="grid grid-1-1">
+        <div class="card">
+          <div class="card-head">
+            <h2>按区域分类</h2>
+            <span class="hint">柱=AQI 均值，折线=优良率</span>
+          </div>
+          <div class="chart-box">
+            <div class="chart" id="regionChart"></div>
+            <p class="empty" id="regionEmpty" hidden>当前筛选条件下没有数据</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>按季节分类</h2>
+            <span class="hint">气象学划分：12~2 冬 · 3~5 春 · 6~8 夏 · 9~11 秋</span>
+          </div>
+          <div class="chart-box">
+            <div class="chart" id="seasonChart"></div>
+            <p class="empty" id="seasonEmpty" hidden>当前筛选条件下没有数据</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-1-1">
+        <div class="card">
+          <div class="card-head">
+            <h2>首要污染物构成</h2>
+            <span class="hint">AQI ≤ 50 时记为"无"</span>
+          </div>
+          <div class="chart-box">
+            <div class="chart" id="pollutantChart"></div>
+            <p class="empty" id="pollutantEmpty" hidden>当前筛选条件下没有数据</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>六档等级天数</h2>
+            <span class="hint" id="levelHint">国标 HJ 633-2012</span>
+          </div>
+          <div class="chart-box">
+            <div class="chart" id="levelBarChart"></div>
+            <p class="empty" id="levelBarEmpty" hidden>当前筛选条件下没有数据</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>城市 × 月份 热力图</h2>
+          <span class="hint">一眼看出"哪座城市在几月最差"</span>
+        </div>
+        <div class="chart-box">
+          <div class="chart chart-lg" id="heatmapChart"></div>
+          <p class="empty" id="heatmapEmpty" hidden>当前筛选条件下没有数据</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 视图：明细（F8） ============ -->
+    <section class="view" data-view="detail" hidden>
+      <div class="card">
+        <div class="card-head">
+          <h2>数据详情</h2>
+          <span class="hint">每页 10 条 · 点行看单条日报</span>
+        </div>
+        <div class="table-wrap">
+          <table class="detail-table">
+            <thead>
+              <tr>
+                <th>城市</th>
+                <th>日期</th>
+                <th class="num" id="thMetric">AQI</th>
+                <th class="num">AQI</th>
+                <th>等级</th>
+                <th>首要污染物</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+          <div class="pager">
+            <button id="btnPrev" class="btn btn-mini" type="button">上一页</button>
+            <span class="page-info" id="pageInfo">第 1 / 1 页 · 共 0 条</span>
+            <button id="btnNext" class="btn btn-mini" type="button">下一页</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="detailCard" hidden>
+        <div class="card-head">
+          <h2>记录详情</h2>
+          <span class="hint" id="detailId">—</span>
+        </div>
+        <dl class="detail-grid" id="detailGrid"></dl>
+        <div class="card-foot">
+          <button class="btn btn-mini" type="button" id="btnCloseDetail">收起</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      AQI 与等级按国标 HJ 633-2012 计算 ·
+      综合指数按 GB 3095-2012 二级标准限值求和（<b>越小越清洁</b>，O₃ 采用日均值口径）·
+      数据集 12 城 × 361 天 = 4,332 条
+    </footer>
   </div>
 
   <script src="vendor/echarts.min.js"></script>

@@ -178,6 +178,23 @@
     return request('/air-quality/' + encodeURIComponent(id));
   }
 
+  /**
+   * 综合分析（扩展能力）：综合指数与排名、六项单项质量指数、城市×月份矩阵、
+   * 区域/季节分组、首要污染物与等级分布。
+   *
+   * 与 A3 的区别：本接口**不接受 metric** —— 综合指数必须同时用到六项污染物，
+   * 传单个指标在这里没有意义，故只带城市与日期。
+   */
+  function getAnalysis(options) {
+    var params = {};
+    if (options.cityIds && options.cityIds.length > 0) {
+      params.cityIds = options.cityIds.join(',');
+    }
+    if (options.start) params.start = options.start;
+    if (options.end) params.end = options.end;
+    return request('/air-quality/analysis', params);
+  }
+
   // ----------------------------------------------------------------
   // 展示辅助
   // ----------------------------------------------------------------
@@ -208,6 +225,7 @@
     queryAirQuality: queryAirQuality,
     queryStats: queryStats,
     querySeries: querySeries,
-    getRecord: getRecord
+    getRecord: getRecord,
+    getAnalysis: getAnalysis
   };
 })(window);

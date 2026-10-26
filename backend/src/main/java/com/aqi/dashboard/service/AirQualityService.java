@@ -10,10 +10,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 空气质量看板业务逻辑层 —— 任务 11 交付物。
@@ -383,6 +386,312 @@ public class AirQualityService {
             ));
         }
         return result;
+    }
+
+    // ==================================================================
+    // 综合分析（扩展能力）：综合指数 + 排名 + 多维对比/分类
+    //
+    // A1~A4 只回答"某个指标是多少"，看板要做"哪座城市更值得去 / 什么时候最差"
+    // 这类判断还缺三样东西：一个能横向比较的综合数、一个分类维度、一个季节维度。
+    // 这里一次性补齐，前端的「对比」「分类」两个 Tab 全部由它驱动。
+    // ==================================================================
+
+    /**
+     * 环境空气质量综合指数（Composite Index，简称 CI）的评价因子与限值。
+     *
+     * <p>口径来自生态环境部《城市环境空气质量排名技术规定》：
+     * <b>单项质量指数 = 污染物浓度 / 该污染物年均值二级标准限值</b>（GB 3095-2012），
+     * <b>综合指数 = 六项单项质量指数之和</b>。与 AQI 不同，它不是"取最大"而是"求和"，
+     * 因此能反映多种污染物叠加的累负担，适合做城际横向排名。</p>
+     *
+     * <p><b>数值越小越清洁</b>（与 AQI 同向、与"评分"反向），这一点在前端必须标注清楚，
+     * 否则会被误读成"分数越高越好"。</p>
+     *
+     * <p>关于 O₃：官方年度评价用"日最大 8 小时滑动平均的第 90 百分位数"，
+     * 而本项目数据集提供的是日均浓度，故这里按日均值参与计算。
+     * 日均值通常低于日最大 8h，因此本指数的绝对值与官方发布值不可直接比较，
+     * <b>仅用于本项目内部的城际横向对比</b>。</p>
+     */
+    private static final Map<String, BigDecimal> CI_LIMITS = new LinkedHashMap<>();
+
+    static {
+        CI_LIMITS.put("pm25", BigDecimal.valueOf(35));
+        CI_LIMITS.put("pm10", BigDecimal.valueOf(70));
+        CI_LIMITS.put("so2", BigDecimal.valueOf(60));
+        CI_LIMITS.put("no2", BigDecimal.valueOf(40));
+        CI_LIMITS.put("co", BigDecimal.valueOf(4));
+        CI_LIMITS.put("o3", BigDecimal.valueOf(160));
+    }
+
+    /** 气象学季节划分：12~2 冬、3~5 春、6~8 夏、9~11 秋 */
+    private static String seasonOf(int month) {
+        if (month >= 3 && month <= 5) return "春";
+        if (month >= 6 && month <= 8) return "夏";
+        if (month >= 9 && month <= 11) return "秋";
+        return "冬";
+    }
+
+    /** 列表均值；空列表返回 null（而不是 0，避免把"缺测"画成"很干净"） */
+    private static BigDecimal safeAvg(List<BigDecimal> values) {
+        if (values == null || values.isEmpty()) return null;
+        BigDecimal sum = BigDecimal.ZERO;
+        for (BigDecimal value : values) sum = sum.add(value);
+        return sum.divide(BigDecimal.valueOf(values.size()), 1, RoundingMode.HALF_UP);
+    }
+
+    /** 单项质量指数 = 浓度 / 限值；浓度缺测时返回 null，不按 0 计入综合指数 */
+    private static BigDecimal ratioOf(BigDecimal value, String factor) {
+        if (value == null) return null;
+        return value.divide(CI_LIMITS.get(factor), 3, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 综合分析：一次返回看板「对比」「分类」两个 Tab 所需的全部聚合结果。
+     *
+     * <p>与 A3 共用 {@code findStatsByConditions} 的结果集，在 Java 侧做二次聚合，
+     * 不新增 SQL —— 12 城 × 361 天 = 4,332 行全量加载的成本可以忽略，
+     * 换来的是"等级""季节""综合指数"这些口径只在此处有一份实现。</p>
+     *
+     * @param cityIds 城市编号集合；null / 空 = 全部城市
+     * @param start   起始日期（含）
+     * @param end     截止日期（含）
+     * @return 综合分析结果；<b>区间内无数据时返回空结构而不是 null</b>
+     */
+    public AnalysisVO getAnalysis(List<Integer> cityIds, LocalDate start, LocalDate end) {
+        LocalDate[] range = resolveRange(start, end);
+        List<Integer> safeCityIds = normalizeCityIds(cityIds);
+        List<AirQuality> rows = airQualityMapper.findStatsByConditions(safeCityIds, range[0], range[1]);
+
+        Map<Integer, City> cityMap = new LinkedHashMap<>();
+        for (City city : airQualityMapper.findAllCities()) {
+            cityMap.put(city.getId(), city);
+        }
+
+        // ---- 1) 按城市：六项浓度均值 -> 单项质量指数 -> 综合指数 -> 排名 ----
+        Map<Integer, List<AirQuality>> byCity = new LinkedHashMap<>();
+        for (AirQuality row : rows) {
+            byCity.computeIfAbsent(row.getCityId(), k -> new ArrayList<>()).add(row);
+        }
+
+        List<CityCompositeVO> composites = new ArrayList<>(byCity.size());
+        for (Map.Entry<Integer, List<AirQuality>> entry : byCity.entrySet()) {
+            Integer code = entry.getKey();
+            List<AirQuality> list = entry.getValue();
+
+            List<BigDecimal> pm25s = new ArrayList<>();
+            List<BigDecimal> pm10s = new ArrayList<>();
+            List<BigDecimal> so2s = new ArrayList<>();
+            List<BigDecimal> no2s = new ArrayList<>();
+            List<BigDecimal> cos = new ArrayList<>();
+            List<BigDecimal> o3s = new ArrayList<>();
+            List<BigDecimal> aqis = new ArrayList<>();
+            int goodDays = 0;
+
+            for (AirQuality r : list) {
+                if (r.getPm25() != null) pm25s.add(BigDecimal.valueOf(r.getPm25()));
+                if (r.getPm10() != null) pm10s.add(BigDecimal.valueOf(r.getPm10()));
+                if (r.getSo2() != null) so2s.add(BigDecimal.valueOf(r.getSo2()));
+                if (r.getNo2() != null) no2s.add(BigDecimal.valueOf(r.getNo2()));
+                if (r.getCo() != null) cos.add(r.getCo());
+                if (r.getO3() != null) o3s.add(BigDecimal.valueOf(r.getO3()));
+                if (r.getAqi() != null) aqis.add(BigDecimal.valueOf(r.getAqi()));
+                Integer lv = r.getLevel();
+                if (lv != null && lv >= 1 && lv <= 2) goodDays++;
+            }
+
+            BigDecimal pm25 = safeAvg(pm25s);
+            BigDecimal pm10 = safeAvg(pm10s);
+            BigDecimal so2 = safeAvg(so2s);
+            BigDecimal no2 = safeAvg(no2s);
+            BigDecimal co = safeAvg(cos);
+            BigDecimal o3 = safeAvg(o3s);
+            BigDecimal aqi = safeAvg(aqis);
+
+            Map<String, BigDecimal> ratios = new LinkedHashMap<>();
+            ratios.put("pm25", ratioOf(pm25, "pm25"));
+            ratios.put("pm10", ratioOf(pm10, "pm10"));
+            ratios.put("so2", ratioOf(so2, "so2"));
+            ratios.put("no2", ratioOf(no2, "no2"));
+            ratios.put("co", ratioOf(co, "co"));
+            ratios.put("o3", ratioOf(o3, "o3"));
+
+            BigDecimal ci = null;
+            if (!ratios.containsValue(null)) {
+                BigDecimal sum = BigDecimal.ZERO;
+                for (BigDecimal v : ratios.values()) sum = sum.add(v);
+                ci = sum.setScale(2, RoundingMode.HALF_UP);
+            }
+
+            int samples = list.size();
+            BigDecimal goodRatio = samples == 0 ? null
+                    : BigDecimal.valueOf(goodDays * 100L)
+                            .divide(BigDecimal.valueOf(samples), 1, RoundingMode.HALF_UP);
+
+            City city = cityMap.get(code);
+            composites.add(new CityCompositeVO(
+                    code,
+                    list.get(0).getCityName(),
+                    city == null ? "" : city.getProvince(),
+                    city == null ? "未分类" : (city.getRegion() == null ? "未分类" : city.getRegion()),
+                    pm25, pm10, so2, no2, co, o3, aqi,
+                    ci, goodRatio, goodDays, samples,
+                    0, ratios
+            ));
+        }
+
+        // 排名：CI 升序（越小越清洁）为第 1 名；CI 缺失的城市排在最后
+        List<CityCompositeVO> ranked = composites.stream()
+                .sorted((a, b) -> {
+                    BigDecimal ac = a.compositeIndex();
+                    BigDecimal bc = b.compositeIndex();
+                    if (ac == null && bc == null) return 0;
+                    if (ac == null) return 1;
+                    if (bc == null) return -1;
+                    return ac.compareTo(bc);
+                })
+                .toList();
+        List<CityCompositeVO> withRank = new ArrayList<>(ranked.size());
+        for (int i = 0; i < ranked.size(); i++) {
+            CityCompositeVO c = ranked.get(i);
+            withRank.add(new CityCompositeVO(
+                    c.code(), c.city(), c.province(), c.region(),
+                    c.pm25(), c.pm10(), c.so2(), c.no2(), c.co(), c.o3(), c.aqi(),
+                    c.compositeIndex(), c.goodRatio(), c.goodDays(), c.samples(),
+                    i + 1, c.ratios()
+            ));
+        }
+
+        // ---- 2) 城市 × 月份：热力图 ----
+        Map<String, List<BigDecimal>> monthCells = new LinkedHashMap<>();
+        Map<String, String> monthCity = new LinkedHashMap<>();
+        Map<String, List<BigDecimal>> monthOverall = new LinkedHashMap<>();
+        for (AirQuality r : rows) {
+            if (r.getMonitorDate() == null || r.getAqi() == null) continue;
+            String month = r.getMonitorDate().getYear() + "-"
+                    + String.format("%02d", r.getMonitorDate().getMonthValue());
+            String key = r.getCityId() + "|" + month;
+            monthCells.computeIfAbsent(key, k -> new ArrayList<>())
+                    .add(BigDecimal.valueOf(r.getAqi()));
+            monthCity.putIfAbsent(key, r.getCityName());
+            monthOverall.computeIfAbsent(month, k -> new ArrayList<>())
+                    .add(BigDecimal.valueOf(r.getAqi()));
+        }
+        List<MonthCellVO> monthly = new ArrayList<>(monthCells.size());
+        for (String key : monthCells.keySet()) {
+            String[] parts = key.split("\\|");
+            BigDecimal avg = safeAvg(monthCells.get(key));
+            if (avg == null) continue;
+            monthly.add(new MonthCellVO(Integer.valueOf(parts[0]), monthCity.get(key), parts[1], avg));
+        }
+        List<MonthPointVO> monthlyTrend = new ArrayList<>(monthOverall.size());
+        for (String month : monthOverall.keySet()) {
+            BigDecimal avg = safeAvg(monthOverall.get(month));
+            if (avg != null) {
+                monthlyTrend.add(new MonthPointVO(month, avg, monthOverall.get(month).size()));
+            }
+        }
+
+        // ---- 3) 按区域 / 季节分类 ----
+        Map<String, List<AirQuality>> byRegion = new LinkedHashMap<>();
+        Map<String, List<AirQuality>> bySeason = new LinkedHashMap<>();
+        for (AirQuality r : rows) {
+            City c = cityMap.get(r.getCityId());
+            String region = (c == null || c.getRegion() == null) ? "未分类" : c.getRegion();
+            byRegion.computeIfAbsent(region, k -> new ArrayList<>()).add(r);
+            if (r.getMonitorDate() != null) {
+                bySeason.computeIfAbsent(seasonOf(r.getMonitorDate().getMonthValue()),
+                        k -> new ArrayList<>()).add(r);
+            }
+        }
+
+        // 区域的综合指数取其成员城市 CI 的均值：CI 是比值量，直接对原始行再求平均没有意义
+        Map<String, List<BigDecimal>> regionCis = new LinkedHashMap<>();
+        for (CityCompositeVO c : withRank) {
+            if (c.compositeIndex() == null) continue;
+            regionCis.computeIfAbsent(c.region(), k -> new ArrayList<>()).add(c.compositeIndex());
+        }
+
+        List<GroupVO> regions = new ArrayList<>(byRegion.size());
+        for (Map.Entry<String, List<AirQuality>> entry : byRegion.entrySet()) {
+            List<AirQuality> list = entry.getValue();
+            List<BigDecimal> aqis = new ArrayList<>();
+            int goodDays = 0;
+            Set<Integer> cities = new LinkedHashSet<>();
+            for (AirQuality r : list) {
+                if (r.getAqi() != null) aqis.add(BigDecimal.valueOf(r.getAqi()));
+                Integer lv = r.getLevel();
+                if (lv != null && lv >= 1 && lv <= 2) goodDays++;
+                cities.add(r.getCityId());
+            }
+            int samples = list.size();
+            regions.add(new GroupVO(
+                    entry.getKey(),
+                    cities.size(),
+                    safeAvg(aqis),
+                    safeAvg(regionCis.get(entry.getKey())),
+                    samples == 0 ? null : BigDecimal.valueOf(goodDays * 100L)
+                            .divide(BigDecimal.valueOf(samples), 1, RoundingMode.HALF_UP),
+                    samples
+            ));
+        }
+        regions.sort(Comparator.comparing(GroupVO::name));
+
+        // 季节按固定顺序输出，否则前端图例顺序会随数据变化抖动
+        List<String> seasonOrder = List.of("春", "夏", "秋", "冬");
+        List<GroupVO> seasons = new ArrayList<>();
+        for (String season : seasonOrder) {
+            List<AirQuality> list = bySeason.get(season);
+            if (list == null || list.isEmpty()) continue;
+            List<BigDecimal> aqis = new ArrayList<>();
+            int goodDays = 0;
+            Set<Integer> cities = new LinkedHashSet<>();
+            for (AirQuality r : list) {
+                if (r.getAqi() != null) aqis.add(BigDecimal.valueOf(r.getAqi()));
+                Integer lv = r.getLevel();
+                if (lv != null && lv >= 1 && lv <= 2) goodDays++;
+                cities.add(r.getCityId());
+            }
+            int samples = list.size();
+            seasons.add(new GroupVO(
+                    season, cities.size(), safeAvg(aqis), null,
+                    samples == 0 ? null : BigDecimal.valueOf(goodDays * 100L)
+                            .divide(BigDecimal.valueOf(samples), 1, RoundingMode.HALF_UP),
+                    samples
+            ));
+        }
+
+        // ---- 4) 首要污染物分布 / 等级分布 ----
+        Map<String, Integer> pollutantCounts = new LinkedHashMap<>();
+        Map<Integer, Integer> levelCounts = new LinkedHashMap<>();
+        for (int level = 1; level <= 6; level++) levelCounts.put(level, 0);
+        for (AirQuality r : rows) {
+            String name = (r.getPrimaryPollutant() == null || r.getPrimaryPollutant().isBlank())
+                    ? "无" : r.getPrimaryPollutant();
+            pollutantCounts.merge(name, 1, Integer::sum);
+            Integer lv = r.getLevel();
+            if (lv != null && lv >= 1 && lv <= 6) levelCounts.merge(lv, 1, Integer::sum);
+        }
+        int totalRows = rows.size();
+        List<ShareVO> pollutants = pollutantCounts.entrySet().stream()
+                .sorted((a, b) -> b.getValue() - a.getValue())
+                .map(e -> new ShareVO(e.getKey(), e.getValue(),
+                        totalRows == 0 ? null : BigDecimal.valueOf(e.getValue() * 100L)
+                                .divide(BigDecimal.valueOf(totalRows), 1, RoundingMode.HALF_UP)))
+                .toList();
+        List<ShareVO> levels = new ArrayList<>();
+        for (int level = 1; level <= 6; level++) {
+            int days = levelCounts.get(level);
+            levels.add(new ShareVO(LEVEL_LABELS[level - 1], days,
+                    totalRows == 0 ? null : BigDecimal.valueOf(days * 100L)
+                            .divide(BigDecimal.valueOf(totalRows), 1, RoundingMode.HALF_UP)));
+        }
+
+        return new AnalysisVO(
+                range[0] == null ? null : range[0].toString(),
+                range[1] == null ? null : range[1].toString(),
+                totalRows,
+                withRank, monthly, monthlyTrend, regions, seasons, pollutants, levels
+        );
     }
 
     /**
@@ -820,6 +1129,87 @@ public class AirQualityService {
             int goodDays,
             int samples,
             Map<Integer, Integer> levelCounts
+    ) {
+    }
+
+    // ------------------------------------------------------------------
+    // 综合分析 VO
+    // ------------------------------------------------------------------
+
+    /**
+     * 单城市综合画像：六项浓度均值 + 综合指数 + 排名 + 六项单项质量指数。
+     *
+     * @param compositeIndex 环境空气质量综合指数（六项单项指数之和），<b>越小越清洁</b>
+     * @param rank           综合指数升序排名，1 = 最清洁
+     * @param ratios         六项单项质量指数（浓度 / 二级标准限值），供雷达图对比；
+     *                       值为 1 表示恰好达到标准限值，&gt;1 表示超标
+     */
+    public record CityCompositeVO(
+            Integer code,
+            String city,
+            String province,
+            String region,
+            BigDecimal pm25,
+            BigDecimal pm10,
+            BigDecimal so2,
+            BigDecimal no2,
+            BigDecimal co,
+            BigDecimal o3,
+            BigDecimal aqi,
+            BigDecimal compositeIndex,
+            BigDecimal goodRatio,
+            int goodDays,
+            int samples,
+            int rank,
+            Map<String, BigDecimal> ratios
+    ) {
+    }
+
+    /** 热力图单元格：城市 × 月份 的 AQI 均值 */
+    public record MonthCellVO(Integer code, String city, String month, BigDecimal aqi) {
+    }
+
+    /** 月度整体走势（所有选中城市合在一起） */
+    public record MonthPointVO(String month, BigDecimal aqi, int samples) {
+    }
+
+    /**
+     * 分类分组结果：区域（华北/东北/…）与季节（春/夏/秋/冬）共用。
+     *
+     * @param cityCount      该组覆盖的城市数
+     * @param compositeIndex 仅区域有值；季节不计算（季节是时间切片，CI 需要完整六项浓度均值才有意义）
+     */
+    public record GroupVO(
+            String name,
+            int cityCount,
+            BigDecimal aqi,
+            BigDecimal compositeIndex,
+            BigDecimal goodRatio,
+            int samples
+    ) {
+    }
+
+    /** 占比分布：首要污染物 / 六档等级共用 */
+    public record ShareVO(String name, int days, BigDecimal ratio) {
+    }
+
+    /**
+     * 综合分析总览（{@code GET /api/air-quality/analysis}）。
+     *
+     * <p>一次请求返回看板「对比」「分类」所需的全部聚合结果，
+     * 避免前端为了画一张图再发 N 个请求。</p>
+     */
+    public record AnalysisVO(
+            String start,
+            String end,
+            int samples,
+            List<CityCompositeVO> cities,
+            List<MonthCellVO> monthly,
+            List<MonthPointVO> monthlyTrend,
+            List<GroupVO> regions,
+            List<GroupVO> seasons,
+            List<ShareVO> pollutants,
+            List<ShareVO> levels
     ) {
     }
 

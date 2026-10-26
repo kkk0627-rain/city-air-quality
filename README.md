@@ -27,7 +27,7 @@ AQI 与等级严格按国标 HJ 633-2012 计算。
 
 | 编号 | 功能 | 实现位置 |
 | --- | --- | --- |
-| F1 | 看板总览布局（标题栏 + 左侧筛选 + 右侧图表区） | `frontend-native/index.html` + `css/style.css` |
+| F1 | 看板总览布局（标题栏 + 横向筛选条 + KPI 卡 + 四个分析页签） | `frontend-native/index.html` + `css/style.css` |
 | F2 | 城市多选（12 城，支持全选/清空） | `js/app.js` → `renderCityChips()` |
 | F3 | 指标切换（AQI / PM2.5 / PM10 / SO₂ / NO₂ / CO / O₃） | `js/app.js` → `renderMetricChips()` |
 | F4 | 时间范围筛选（日期控件 + 近 7/30/90 天、全年快捷区间） | `js/app.js` → `renderRangeInputs()` |
@@ -35,6 +35,30 @@ AQI 与等级严格按国标 HJ 633-2012 计算。
 | F6 | 城市对比柱状图（按时段均值升序） | `js/charts.js` → `buildCompare()` |
 | F7 | 空气质量等级分布环形图（六档国标配色） | `js/charts.js` → `buildPie()` |
 | F8 | 数据详情表格（每页 10 条，翻页 + 行点击看详情） | `js/app.js` → `renderTable()` |
+
+### 2.1 综合性指标：环境空气质量综合指数
+
+AQI 取"六项分指数的最大值"，一项超标就拉高，无法比较城市整体优劣。
+本项目另实现了国标思路的**综合指数 CI**（越小越清洁，六项同时计入）：
+
+```
+CI = PM2.5/35 + PM10/70 + SO2/60 + NO2/40 + CO/4 + O3/160
+```
+
+由 `/api/air-quality/analysis` 返回（`AirQualityService.getAnalysis()`），
+前端按 CI 升序排名并分 5 档：`<2.2 优 / <2.8 良 / <3.4 一般 / <4.0 较差 / ≥4.0 差`。
+
+> O₃ 国标口径是"日最大 8 小时滑动平均第 90 百分位"，数据集只有日均值，
+> 故以日均值替代——绝对值与官方发布不完全可比，但**城市间横向排序有效**。
+
+### 2.2 四个分析页签
+
+- **总览** —— 逐日趋势 + 等级环形 + 月度走势
+- **对比** —— 综合指数排名 + 六项污染物雷达 + 城市对比柱 + 城市档案表（点表头排序）
+- **分类** —— 区域 / 季节 / 首要污染物 / 六档等级天数 / 城市×月份热力图
+- **明细** —— 分页表格 + 单条详情
+
+"对比""分类"共 7 张图为课程要求之外的新增，共用同一份分析接口数据。
 
 ---
 
@@ -156,6 +180,21 @@ Swagger UI（后端启动后可直接在浏览器里调试）：
 | A2 | GET | `/api/air-quality` | 明细分页，参数 `cityIds` / `metric` / `start` / `end` / `page` / `size` |
 | A3 | GET | `/api/air-quality/stats` | 分组统计：均值 / 最大 / 最小 / 优良率 / 各等级天数 |
 | A4 | GET | `/api/air-quality/{id}` | 单条记录详情 |
+| A5 | GET | `/api/air-quality/analysis` | 综合分析：城市综合指数排名、月度趋势、区域/季节分组、首要污染物与等级构成 |
+
+A5 是"对比""分类"两个页签的唯一数据源，参数 `cityIds` / `start` / `end`
+（**不接受 `metric`** —— 综合指数需要六项浓度齐全才能算）。
+
+```
+data.cities[]       code/city/province/region/pm25…o3/aqi/compositeIndex/
+                    goodRatio/goodDays/samples/rank/ratios{pm25,pm10,so2,no2,co,o3}
+data.monthly[]      城市 × 月份 × AQI，144 格（热力图）
+data.monthlyTrend[] 月度 AQI 走势，12 点
+data.regions[]      7 个区域：aqi / compositeIndex / goodRatio / cityCount
+data.seasons[]      春/夏/秋/冬：aqi / goodRatio / cityCount
+data.pollutants[]   首要污染物构成（含"无"），data.levels[] 六档等级天数
+data.samples        样本总条数
+```
 
 配套接口：`/api/air-quality/meta`（数据集日期边界与指标列表）、
 `/api/air-quality/series`（多城趋势序列）、`/api/aqi/overview`（焦点城市概览）。
